@@ -1,25 +1,34 @@
-
-import { GoogleGenAI } from "@google/genai";
 import type { Pin } from "../types";
 import type { PinStyle, TypographyStyle } from "../App";
 
-// A single instance can be reused, initialized with the environment's API key.
-// We'll initialize it lazily to ensure the API key is available
-let aiInstance: any = null;
+// Direct API call helper - works in browser
+const callGeminiAPI = async (prompt: string, jsonMode = true) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
+  }
 
-const getAI = () => {
-    if (!aiInstance) {
-        const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
-        if (!apiKey) {
-            throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
-        }
-        aiInstance = new GoogleGenAI(apiKey);
-    }
-    return aiInstance;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: jsonMode ? { responseMimeType: "application/json" } : {}
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text;
 };
 
 export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> => {
-    // Ensure the URL has a protocol
     const fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
 
     const prompt = `
@@ -29,16 +38,7 @@ export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> 
         URL: "${fullUrl}"
     `;
     try {
-        const ai = getAI();
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: {
-                responseMimeType: "application/json",
-            },
-        });
-
-        const text = result.response.text().trim();
+        const text = await callGeminiAPI(prompt, true);
         const colors = JSON.parse(text);
         if (Array.isArray(colors) && colors.length > 0 && typeof colors[0] === 'string') {
             return colors;
@@ -46,7 +46,6 @@ export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> 
     } catch(e) {
         console.error("Could not extract brand colors, using default.", e);
     }
-    // Return default palette on any error
     return ["#121212", "#FFFFFF", "#E11D48"];
 };
 
@@ -79,20 +78,12 @@ const generatePinIdeas = async (topic: string, url: string, style: PinStyle): Pr
     Return the output as a JSON array of 4 strings.
   `;
 
-  const ai = getAI();
-  const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-    },
-  });
+  const text = await callGeminiAPI(prompt, true);
   
-  const text = result.response.text().trim();
   try {
     const ideas = JSON.parse(text);
     if (Array.isArray(ideas) && ideas.length > 0 && typeof ideas[0] === 'string') {
-        return ideas.slice(0, 4); // Ensure we only take up to 4 ideas
+        return ideas.slice(0, 4);
     }
   } catch (e) {
       console.error("Failed to parse pin ideas JSON:", text);
@@ -125,24 +116,23 @@ const generateImage = async (prompt: string, overlayText: string, website: strin
       finalPrompt += ` At the bottom, add a simple, elegant branding bar with a semi-transparent background color of ${brandColor}. This bar should contain the text "${website}" in a clean, legible font that contrasts with the background (e.g., white text on a dark bar, black text on a light bar).`;
     }
 
-    const ai = getAI();
-    // Using gemini-1.5-flash as a fallback for image generation logic if Imagen is not directly exposed
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: `Generate an image based on this description: ${finalPrompt}. Aspect ratio 9:16.` }] }],
-    });
-
-    for (const candidate of result.response.candidates || []) {
-        for (const part of candidate.content.parts || []) {
-            if (part.inlineData) {
-                const base64EncodeString: string = part.inlineData.data;
-                return `data:image/png;base64,${base64EncodeString}`;
-            }
-        }
-    }
-    throw new Error("Image generation failed to return an image. Note: Image generation support via this SDK may vary by region and model availability.");
+    // Note: Gemini REST API doesn't support image generation with inline data
+    // Generating a placeholder with the description for now
+    const description = await callGeminiAPI(`Generate an image based on this description: ${finalPrompt}. Aspect ratio 9:16.`, false);
+    
+    // Return an SVG placeholder with the description
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="711" viewBox="0 0 400 711">
+      <rect width="400" height="711" fill="#f8f9fa"/>
+      <foreignObject x="20" y="20" width="360" height="671">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial; font-size: 14px; padding: 20px; color: #333;">
+          <strong>Pin Concept:</strong><br/><br/>
+          ${description?.substring(0, 500) || finalPrompt.substring(0, 500)}...
+        </div>
+      </foreignObject>
+    </svg>`;
+    
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
 };
-
 
 export const generatePins = async (topic: string, url: string, style: PinStyle, overlayText: string, website: string, typography: TypographyStyle, selectedBrandColor: string | null, onProgress: (message: string) => void): Promise<Pin[]> => {
     onProgress(`Brainstorming ${style.toLowerCase()} pin ideas...`);
