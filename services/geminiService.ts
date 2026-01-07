@@ -9,8 +9,7 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
     throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
   }
 
-  // ✅ CHANGED: v1 → v1beta (supports JSON mode)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
 
   const requestBody: any = {
     contents: [{ 
@@ -20,7 +19,6 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
 
   if (jsonMode) {
     requestBody.generationConfig = {
-      // ✅ CHANGED: responseMimeType → response_mime_type (snake_case for v1beta)
       response_mime_type: "application/json"
     };
   }
@@ -38,7 +36,14 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
   }
 
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text;
+  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  
+  // ✅ FIX: Clean markdown code blocks from JSON responses
+  if (jsonMode && text) {
+    text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  }
+  
+  return text;
 };
 
 export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> => {
@@ -129,22 +134,24 @@ const generateImage = async (prompt: string, overlayText: string, website: strin
       finalPrompt += ` At the bottom, add a simple, elegant branding bar with a semi-transparent background color of ${brandColor}. This bar should contain the text "${website}" in a clean, legible font that contrasts with the background (e.g., white text on a dark bar, black text on a light bar).`;
     }
 
-    // Note: Gemini REST API doesn't support image generation with inline data
-    // Generating a placeholder with the description for now
     const description = await callGeminiAPI(`Generate an image based on this description: ${finalPrompt}. Aspect ratio 9:16.`, false);
     
-    // Return an SVG placeholder with the description
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="711" viewBox="0 0 400 711">
       <rect width="400" height="711" fill="#f8f9fa"/>
       <foreignObject x="20" y="20" width="360" height="671">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial; font-size: 14px; padding: 20px; color: #333;">
           <strong>Pin Concept:</strong><br/><br/>
-          ${description?.substring(0, 500) || finalPrompt.substring(0, 500)}...
+          ${(description?.substring(0, 500) || finalPrompt.substring(0, 500)).replace(/[<>]/g, '')}...
         </div>
       </foreignObject>
     </svg>`;
     
-    return `data:image/svg+xml;base64,${btoa(svg)}`;
+    // ✅ FIX: Handle encoding errors
+    try {
+      return `data:image/svg+xml;base64,${btoa(svg)}`;
+    } catch (e) {
+      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    }
 };
 
 export const generatePins = async (topic: string, url: string, style: PinStyle, overlayText: string, website: string, typography: TypographyStyle, selectedBrandColor: string | null, onProgress: (message: string) => void): Promise<Pin[]> => {
