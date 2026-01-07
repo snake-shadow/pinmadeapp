@@ -9,19 +9,30 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
     throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+  const requestBody: any = {
+    contents: [{ 
+      parts: [{ text: prompt }]
+    }]
+  };
+
+  if (jsonMode) {
+    requestBody.generationConfig = {
+      response_mime_type: "application/json"
+    };
+  }
 
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: jsonMode ? { responseMimeType: "application/json" } : {}
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.statusText}`);
+    const errorText = await response.text();
+    console.error("Gemini API error details:", errorText);
+    throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json();
