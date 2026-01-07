@@ -4,7 +4,7 @@ import type { Pin } from "../types";
 import type { PinStyle, TypographyStyle } from "../App";
 
 // A single instance can be reused, initialized with the environment's API key.
-const ai = new GoogleGenAI(process.env.API_KEY || '');
+const ai = new GoogleGenAI(process.env.API_KEY!);
 
 export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> => {
     // Ensure the URL has a protocol
