@@ -19,7 +19,7 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
 
   if (jsonMode) {
     requestBody.generationConfig = {
-      response_mime_type: "application/json"
+      responseMimeType: "application/json"  // ✅ FIXED - was response_mime_type
     };
   }
 
