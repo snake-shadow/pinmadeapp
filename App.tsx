@@ -21,7 +21,7 @@ export default function App() {
   const [brandPalette, setBrandPalette] = useState<string[]>([]);
   const [selectedBrandColor, setSelectedBrandColor] = useState<string | null>(null);
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
 
   const [pins, setPins] = useState<Pin[]>([]);
   const [isLoading, setIsLoading] = useState(false);
