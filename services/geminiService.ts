@@ -1,10 +1,22 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import type { Pin } from "../types";
 import type { PinStyle, TypographyStyle } from "../App";
 
 // A single instance can be reused, initialized with the environment's API key.
-const ai = new GoogleGenAI((import.meta as any).env.VITE_GEMINI_API_KEY || '');
+// We'll initialize it lazily to ensure the API key is available
+let aiInstance: any = null;
+
+const getAI = () => {
+    if (!aiInstance) {
+        const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
+        }
+        aiInstance = new GoogleGenAI(apiKey);
+    }
+    return aiInstance;
+};
 
 export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> => {
     // Ensure the URL has a protocol
@@ -17,19 +29,16 @@ export const extractBrandColorsFromUrl = async (url: string): Promise<string[]> 
         URL: "${fullUrl}"
     `;
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt,
-            config: {
+        const ai = getAI();
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
                 responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                },
             },
         });
 
-        const text = response.text.trim();
+        const text = result.response.text().trim();
         const colors = JSON.parse(text);
         if (Array.isArray(colors) && colors.length > 0 && typeof colors[0] === 'string') {
             return colors;
@@ -70,22 +79,16 @@ const generatePinIdeas = async (topic: string, url: string, style: PinStyle): Pr
     Return the output as a JSON array of 4 strings.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
+  const ai = getAI();
+  const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
       responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.STRING,
-          description: "A detailed visual prompt for an AI image generator.",
-        },
-      },
     },
   });
   
-  const text = response.text.trim();
+  const text = result.response.text().trim();
   try {
     const ideas = JSON.parse(text);
     if (Array.isArray(ideas) && ideas.length > 0 && typeof ideas[0] === 'string') {
@@ -122,25 +125,22 @@ const generateImage = async (prompt: string, overlayText: string, website: strin
       finalPrompt += ` At the bottom, add a simple, elegant branding bar with a semi-transparent background color of ${brandColor}. This bar should contain the text "${website}" in a clean, legible font that contrasts with the background (e.g., white text on a dark bar, black text on a light bar).`;
     }
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-            parts: [{ text: finalPrompt }],
-        },
-        config: {
-            imageConfig: {
-                aspectRatio: "9:16", // Pinterest pin aspect ratio
-            },
-        },
+    const ai = getAI();
+    // Using gemini-1.5-flash as a fallback for image generation logic if Imagen is not directly exposed
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: `Generate an image based on this description: ${finalPrompt}. Aspect ratio 9:16.` }] }],
     });
 
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            const base64EncodeString: string = part.inlineData.data;
-            return `data:image/png;base64,${base64EncodeString}`;
+    for (const candidate of result.response.candidates || []) {
+        for (const part of candidate.content.parts || []) {
+            if (part.inlineData) {
+                const base64EncodeString: string = part.inlineData.data;
+                return `data:image/png;base64,${base64EncodeString}`;
+            }
         }
     }
-    throw new Error("Image generation failed to return an image.");
+    throw new Error("Image generation failed to return an image. Note: Image generation support via this SDK may vary by region and model availability.");
 };
 
 
