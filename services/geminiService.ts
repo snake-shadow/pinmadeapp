@@ -9,7 +9,8 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
     throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // ✅ CHANGED: v1 → v1beta (supports JSON mode)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
   const requestBody: any = {
     contents: [{ 
@@ -19,7 +20,8 @@ const callGeminiAPI = async (prompt: string, jsonMode = true) => {
 
   if (jsonMode) {
     requestBody.generationConfig = {
-      responseMimeType: "application/json"  // ✅ FIXED - was response_mime_type
+      // ✅ CHANGED: responseMimeType → response_mime_type (snake_case for v1beta)
+      response_mime_type: "application/json"
     };
   }
 
